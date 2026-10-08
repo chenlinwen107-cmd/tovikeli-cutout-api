@@ -73,9 +73,9 @@ test("resend rejects non-JSON content types safely", async () => {
   assert.equal((await response.json()).error.code, "validation_error");
 });
 
-test("verification GET without a token shows an invalid-link page without touching D1", async () => {
+test("verification GET without a token shows a client-error invalid-link page without touching D1", async () => {
   const response = await request("/api/auth/verify-email");
-  assert.equal(response.status, 200);
+  assert.equal(response.status, 400);
   assert.match(response.headers.get("Content-Type"), /text\/html/);
   assert.match(await response.text(), /验证链接无效/);
   assert.equal(response.headers.get("Cache-Control"), "no-store");
