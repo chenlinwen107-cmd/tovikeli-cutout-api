@@ -274,6 +274,12 @@ function safeAppUrl(value) {
   }
 }
 
+function verificationConfirmPage(token) {
+  const action = escapeHtml("/api/auth/verify-email?token=" + encodeURIComponent(token));
+  const html = '<!doctype html><html lang="zh-CN"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Tovikeli 邮箱验证</title></head><body><main><h1>确认邮箱验证</h1><p>点击按钮完成邮箱验证。如果你没有注册账户，可以关闭此页面。</p><form method="post" action="' + action + '"><button type="submit">确认并验证邮箱</button></form><p>Tovikeli</p></main></body></html>';
+  return new Response(html, { status: 200, headers: { "Content-Type": "text/html; charset=utf-8", "Cache-Control": "no-store", "Referrer-Policy": "no-referrer", "X-Content-Type-Options": "nosniff" } });
+}
+
 function verificationResultPage(success, title, message, redirectUrl = "") {
   const target = redirectUrl ? escapeHtml(redirectUrl) : "";
   const refresh = success && target ? `<meta http-equiv="refresh" content="4;url=${target}">` : "";
