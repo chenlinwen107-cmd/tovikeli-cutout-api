@@ -144,9 +144,20 @@ async function handleResendVerification(request, env) {
   const emailHash = await sha256Hex(email);
   const slot = await env.DB.prepare(
     `INSERT INTO email_verification_resend_limits
-       (email_hash, window_started_at, last_sent_at, send_count)
-     VALUES (?1, ?2, ?2, 1)
+       (email_hash, window_started_at, last_sent_at, send_count,
+        daily_window_started_at, daily_send_count)
+     VALUES (?1, ?2, ?2, 1, ?2, 1)
      ON CONFLICT(email_hash) DO UPDATE SET
+       daily_window_started_at = CASE
+         WHEN daily_window_started_at IS NULL
+           OR unixepoch(?2) - unixepoch(daily_window_started_at) >= 86400 THEN ?2
+         ELSE daily_window_started_at
+       END,
+       daily_send_count = CASE
+         WHEN daily_window_started_at IS NULL
+           OR unixepoch(?2) - unixepoch(daily_window_started_at) >= 86400 THEN 1
+         ELSE daily_send_count + 1
+       END,
        window_started_at = CASE
          WHEN unixepoch(?2) - unixepoch(window_started_at) >= 3600 THEN ?2
          ELSE window_started_at
@@ -157,9 +168,16 @@ async function handleResendVerification(request, env) {
        END,
        last_sent_at = ?2
      WHERE
-       unixepoch(?2) - unixepoch(window_started_at) >= 3600
-       OR (unixepoch(?2) - unixepoch(last_sent_at) >= 60 AND send_count < 3)
-     RETURNING send_count`
+       daily_window_started_at IS NULL
+       OR unixepoch(?2) - unixepoch(daily_window_started_at) >= 86400
+       OR (
+         daily_send_count < 5
+         AND (
+           unixepoch(?2) - unixepoch(window_started_at) >= 3600
+           OR (unixepoch(?2) - unixepoch(last_sent_at) >= 60 AND send_count < 3)
+         )
+       )
+     RETURNING send_count, daily_send_count`
   ).bind(emailHash, now).first();
 
   // Return the same response for rate-limited and unknown/verified addresses.
