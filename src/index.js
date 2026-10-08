@@ -84,6 +84,15 @@ async function handleRegister(request, env) {
   const verificationUrl = new URL("/api/auth/verify-email", request.url);
   verificationUrl.searchParams.set("token", token);
 
+  const emailBudgetSlot = await reserveGlobalEmailSlot(env.DB, new Date().toISOString());
+  if (!emailBudgetSlot) {
+    await env.DB.batch([
+      env.DB.prepare("DELETE FROM email_verification_tokens WHERE user_id = ?1").bind(userId),
+      env.DB.prepare("DELETE FROM users WHERE id = ?1 AND email_verified = 0").bind(userId),
+    ]);
+    return json({ error: { code: "email_daily_budget_exhausted", message: "验证邮件服务今日发送额度已用完，请稍后再试。" } }, 503);
+  }
+
   try {
     await sendTemplateEmail(env, {
       to: email,
@@ -192,6 +201,13 @@ async function handleResendVerification(request, env) {
 
   const verificationUrl = new URL("/api/auth/verify-email", request.url);
   verificationUrl.searchParams.set("token", token);
+
+  const emailBudgetSlot = await reserveGlobalEmailSlot(env.DB, now);
+  if (!emailBudgetSlot) {
+    await env.DB.prepare("DELETE FROM email_verification_tokens WHERE token_hash = ?1").bind(tokenHash).run();
+    // Keep the per-email rate-limit slot consumed even when the global budget is exhausted.
+    return json({ error: { code: "email_daily_budget_exhausted", message: "验证邮件服务今日发送额度已用完，请稍后再试。" } }, 503);
+  }
 
   try {
     await sendTemplateEmail(env, {
@@ -372,6 +388,28 @@ async function handleVerifyEmail(url, env, confirmOnly) {
     "你的 Tovikeli 账户已完成邮箱验证。现在可以返回网站登录并开始使用。",
     safeAppUrl(env.APP_BASE_URL)
   );
+}
+
+// Atomically reserve a global rolling 24-hour email budget slot.
+ // Keep the cap below the provider's advertised free quota to leave operational headroom.
+async function reserveGlobalEmailSlot(db, now) {
+  return db.prepare(
+    `INSERT INTO email_verification_global_daily_budget
+       (id, window_started_at, send_count)
+     VALUES (1, ?1, 1)
+     ON CONFLICT(id) DO UPDATE SET
+       window_started_at = CASE
+         WHEN unixepoch(?1) - unixepoch(window_started_at) >= 86400 THEN ?1
+         ELSE window_started_at
+       END,
+       send_count = CASE
+         WHEN unixepoch(?1) - unixepoch(window_started_at) >= 86400 THEN 1
+         ELSE send_count + 1
+       END
+     WHERE unixepoch(?1) - unixepoch(window_started_at) >= 86400
+        OR send_count < 80
+     RETURNING send_count`
+  ).bind(now).first();
 }
 
 async function sendTemplateEmail(env, { to, templateId, variables, idempotencyKey }) {
