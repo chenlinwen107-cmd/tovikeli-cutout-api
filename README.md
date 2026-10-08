@@ -6,6 +6,7 @@ Dependency-free Cloudflare Worker for the current Tovikeli Cutout frontend.
 
 - GET /api/auth/me
 - POST /api/auth/register
+- GET /api/auth/verify-email
 - POST /api/auth/login
 - POST /api/auth/logout
 - GET /api/health
@@ -21,7 +22,7 @@ The Worker expects a D1 binding named `DB`, pointing to the existing `tovikeli-c
 - No localStorage authentication token
 - Passwords use PBKDF2-SHA-256 with a per-user random salt
 - Session lifetime: 30 days
-- Registration automatically creates a session
+- New registrations require email verification before login
 
 ## Not included yet
 
@@ -47,4 +48,4 @@ Apply `migrations/0002_email_verification.sql` to the existing D1 database befor
 
 ### Registration behavior
 
-New registrations create an unverified account and send a 30-minute verification link. The user is not logged in until verification succeeds. The verification link opens a branded confirmation page and then returns to `APP_BASE_URL`.
+New registrations create an unverified account and send a 30-minute verification link. The user is not logged in until verification succeeds. The verification link opens a branded confirmation page and then returns to `APP_BASE_URL`. Expired or invalid links currently require support intervention; automatic resend is not implemented yet.
