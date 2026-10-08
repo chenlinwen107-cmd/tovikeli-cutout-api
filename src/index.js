@@ -323,15 +323,30 @@ async function handleVerifyEmail(url, env, confirmOnly) {
   }
   if (new Date(record.expires_at).getTime() <= Date.now()) {
     await env.DB.prepare("DELETE FROM email_verification_tokens WHERE token_hash = ?1").bind(tokenHash).run();
-    return verificationResultPage(false, "验证链接已过期", "此链接已超过 30 分钟有效期。目前暂不支持自动重发验证邮件，请联系 Tovikeli 支持。");
+    return verificationResultPage(false, "验证链接已过期", "此链接已超过 30 分钟有效期。请返回网站重新发送验证邮件。");
   }
 
   if (confirmOnly) return verificationConfirmPage(token);
 
-  await env.DB.batch([
-    env.DB.prepare("UPDATE users SET email_verified = 1 WHERE id = ?1").bind(record.user_id),
-    env.DB.prepare("DELETE FROM email_verification_tokens WHERE user_id = ?1").bind(record.user_id),
-  ]);
+  // Atomically consume a still-valid token while changing the account state.
+  // Concurrent POSTs using the same token cannot both perform the state transition.
+  const verified = await env.DB.prepare(
+    `UPDATE users
+     SET email_verified = 1
+     WHERE id = ?1
+       AND email_verified = 0
+       AND EXISTS (
+         SELECT 1 FROM email_verification_tokens
+         WHERE token_hash = ?2 AND user_id = ?1 AND expires_at > ?3
+       )
+     RETURNING id`
+  ).bind(record.user_id, tokenHash, new Date().toISOString()).first();
+
+  if (!verified) {
+    return verificationResultPage(false, "验证链接无效或已使用", "此链接可能已使用或已过期。请返回网站重新发送验证邮件。");
+  }
+
+  await env.DB.prepare("DELETE FROM email_verification_tokens WHERE user_id = ?1").bind(record.user_id).run();
 
   return verificationResultPage(
     true,
