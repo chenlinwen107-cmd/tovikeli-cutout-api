@@ -42,6 +42,8 @@ This branch adds a Resend-backed email verification flow.
 - `VERIFY_EMAIL_TEMPLATE_ID`: published Resend template alias (currently `verification-email`).
 - `APP_BASE_URL`: HTTPS URL of the Tovikeli Cutout frontend to return to after verification. Planned production URL: `https://cutout.tovikeli.top`. This subdomain has been chosen in advance but is not yet deployed; set this variable to the actual frontend URL when the site is ready. If omitted, the Worker falls back to `https://cutout.tovikeli.top/`.
 
+CORS allows credentialed requests only from `https://cutout.tovikeli.top` by default. Optional `CORS_ALLOWED_ORIGINS` can add exact comma-separated origins for development; do not use a wildcard origin with credentials. The frontend should call `GET /api/health` before registration and again on submit, and must not automatically retry a registration or email-send request after an ambiguous network failure. Health-check success only proves the backend was reachable at that moment.
+
 The `CREDITS_ADDED_TEMPLATE_ID` can be configured now, but the credits-added email is not triggered yet because payment and credit-ledger logic are not implemented.
 
 ### Database migration
