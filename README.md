@@ -6,7 +6,8 @@ Dependency-free Cloudflare Worker for the current Tovikeli Cutout frontend.
 
 - GET /api/auth/me
 - POST /api/auth/register
-- GET /api/auth/verify-email
+- GET /api/auth/verify-email (confirmation page)
+- POST /api/auth/verify-email (confirm verification)
 - POST /api/auth/login
 - POST /api/auth/logout
 - GET /api/health
