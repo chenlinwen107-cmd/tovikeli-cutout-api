@@ -20,6 +20,49 @@ test("health endpoint returns an uncached success response", async () => {
   assert.deepEqual(await response.json(), { ok: true, service: "tovikeli-cutout-api" });
 });
 
+test("health endpoint allows the configured frontend origin with credentials", async () => {
+  const response = await request("/api/health", {
+    headers: { Origin: "https://cutout.tovikeli.top" },
+  });
+  assert.equal(response.status, 200);
+  assert.equal(response.headers.get("Access-Control-Allow-Origin"), "https://cutout.tovikeli.top");
+  assert.equal(response.headers.get("Access-Control-Allow-Credentials"), "true");
+  assert.match(response.headers.get("Vary"), /Origin/);
+});
+
+test("CORS preflight allows the frontend origin and expected API headers", async () => {
+  const response = await request("/api/auth/register", {
+    method: "OPTIONS",
+    headers: {
+      Origin: "https://cutout.tovikeli.top",
+      "Access-Control-Request-Method": "POST",
+      "Access-Control-Request-Headers": "content-type",
+    },
+  });
+  assert.equal(response.status, 204);
+  assert.equal(response.headers.get("Access-Control-Allow-Origin"), "https://cutout.tovikeli.top");
+  assert.equal(response.headers.get("Access-Control-Allow-Credentials"), "true");
+  assert.match(response.headers.get("Access-Control-Allow-Methods"), /POST/);
+  assert.match(response.headers.get("Access-Control-Allow-Headers"), /Content-Type/i);
+});
+
+test("CORS does not allow an unconfigured origin", async () => {
+  const response = await request("/api/health", {
+    headers: { Origin: "https://attacker.example" },
+  });
+  assert.equal(response.status, 200);
+  assert.equal(response.headers.get("Access-Control-Allow-Origin"), null);
+});
+
+test("CORS preflight rejects an unconfigured origin", async () => {
+  const response = await request("/api/auth/register", {
+    method: "OPTIONS",
+    headers: { Origin: "https://attacker.example" },
+  });
+  assert.equal(response.status, 403);
+  assert.equal(response.headers.get("Access-Control-Allow-Origin"), null);
+});
+
 test("unknown routes return JSON 404", async () => {
   const response = await request("/does-not-exist");
   assert.equal(response.status, 404);
