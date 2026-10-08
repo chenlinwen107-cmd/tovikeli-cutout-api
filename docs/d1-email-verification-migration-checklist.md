@@ -1,0 +1,116 @@
+# D1 migration preflight: email verification
+
+Do **not** apply `0002_email_verification.sql`, `0003_email_verification_resend_limits.sql`, or `0004_email_verification_daily_limit.sql`, or `0005_global_email_daily_budget.sql` until these checks pass against the existing production D1 database.
+
+Run each query separately in the Cloudflare D1 SQL console. These are read-only checks.
+
+## 1. Confirm the existing tables
+
+```sql
+SELECT name, type
+FROM sqlite_master
+WHERE type IN ('table', 'index')
+ORDER BY type, name;
+```
+
+Expected existing tables include `users` and `sessions`.
+
+## 2. Confirm the users schema
+
+```sql
+PRAGMA table_info(users);
+```
+
+The existing `users` table must contain at least `id`, `email`, `password_hash`, and `created_at`. Check that `email_verified` does not already exist before applying migration 0002. If it already exists, stop and reconcile the migration rather than running it again.
+
+## 3. Confirm the sessions schema
+
+```sql
+PRAGMA table_info(sessions);
+```
+
+The current Worker expects `sessions.id`, `sessions.user_id`, `sessions.expires_at`, and `sessions.created_at`.
+
+## 4. Check existing user counts
+
+```sql
+SELECT COUNT(*) AS users_count FROM users;
+SELECT COUNT(*) AS sessions_count FROM sessions;
+```
+
+Record the counts before migration so they can be compared afterward. Do not export or share password hashes or session identifiers.
+
+## 5. Apply and verify
+
+Only after the schema checks pass, apply `migrations/0002_email_verification.sql` once, followed by `migrations/0003_email_verification_resend_limits.sql` once and `migrations/0004_email_verification_daily_limit.sql` once. Then run:
+
+```sql
+PRAGMA table_info(users);
+SELECT name FROM sqlite_master
+WHERE type = 'table' AND name IN ('email_verification_tokens', 'email_verification_resend_limits', 'email_verification_global_daily_budget');
+SELECT COUNT(*) AS users_count FROM users;
+SELECT COUNT(*) AS sessions_count FROM sessions;
+```
+
+Confirm that `users.email_verified`, `email_verification_tokens`, and `email_verification_resend_limits` exist. Confirm the rate-limit table contains `daily_window_started_at` and `daily_send_count`; confirm `email_verification_global_daily_budget` exists; and confirm the user/session counts have not unexpectedly changed.
+
+## Important
+
+- This checklist does not execute any SQL and does not modify D1.
+- Do not deploy the email-verification Worker before all four migrations are applied successfully; registration/login expect `users.email_verified`, and resend expects `email_verification_resend_limits` with the daily-limit columns and the global budget table.
+- Existing users receive `email_verified = 1` through the migration default, while newly registered users are inserted with `email_verified = 0`.
+- If the existing schema differs from the assumptions above, stop and update the migration/code to match the real schema before proceeding.
+
+
+## Registration failure recovery
+
+If the email provider rejects a verification message, the Worker attempts to remove the newly created unverified user and token. If D1 is unavailable during that cleanup, the cleanup itself can fail; inspect Worker logs for `Registration cleanup failed` and reconcile only the affected unverified account after confirming the email was not delivered. Never log or share passwords, raw verification tokens, session IDs, or password hashes.
+
+## Verification-link behavior test matrix
+
+Before deployment, test these cases in a non-production D1 database:
+
+- A valid token opened with GET displays the confirmation page and does not mark the account verified.
+- Submitting that page with POST verifies the account and removes the token.
+- Reusing the token after successful verification fails as invalid/used.
+- An expired token fails and is removed.
+- A malformed or missing token returns an invalid-link page.
+- A new account cannot log in before verification; it can log in after verification.
+- Existing accounts retain access after migration.
+- A simulated Resend failure returns an error and attempts to clean up the pending account/token.
+- A simulated D1 cleanup failure is logged without exposing secrets in logs.
+
+Do not run destructive tests against production users.
+
+
+## Verification resend test matrix
+
+Test only in a non-production environment after applying all three migrations:
+
+- An unknown email returns the same generic success-shaped response and sends no email.
+- An already verified email returns the same generic response and sends no email.
+- An existing unverified account receives a fresh 30-minute link.
+- A second request inside 60 seconds is suppressed.
+- After the cooldown, no more than three sends are accepted within the fixed hourly window that starts with the first allowed send.
+- The fourth request within that fixed hourly window is suppressed; the hourly limit resets one hour after the first allowed send.
+- The sixth allowed attempt within a fixed 24-hour window is suppressed; the daily limit resets 24 hours after the first allowed attempt in that window.
+- Reaching the daily limit remains blocked even after the hourly window resets; reaching the hourly limit remains blocked even if the daily window resets.
+- A Resend failure returns an error, removes the newly created token if cleanup succeeds, and does not free the rate-limit slot.
+- A successful resend removes older tokens for that user after the new message is accepted.
+- The rate-limit table stores only the SHA-256 email hash, not the raw email address.
+- Concurrent resend requests do not exceed the configured limit; verify against the actual D1 runtime before deployment.
+
+The endpoint intentionally returns a generic response for unknown, verified, and rate-limited addresses to reduce account enumeration. Do not test by sending repeated emails to real users.
+
+
+## Global email budget test matrix
+
+- The global budget table is empty before the first allowed verification-email attempt.
+- The first attempt creates the singleton row with count 1.
+- Up to 80 attempts are reserved in a rolling 24-hour window; the 81st is blocked.
+- After the rolling window expires, the counter resets atomically on the next attempt.
+- Both registration and resend use the same global budget.
+- A failed Resend attempt still consumes its reserved slot; do not retry automatically.
+- Verify concurrent requests cannot reserve more than 80 slots using a non-production D1 database.
+
+The 80-attempt ceiling is intentionally below the provider's stated free quota to leave room for operational headroom. It is a rolling 24-hour window and may not align with Resend's quota reset period.
