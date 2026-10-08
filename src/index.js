@@ -261,10 +261,10 @@ async function sha256Hex(value) {
 
 function safeAppUrl(value) {
   try {
-    const url = new URL(value || "https://tovikeli.top/");
-    return url.protocol === "https:" ? url.toString() : "https://tovikeli.top/";
+    const url = new URL(value || "https://cutout.tovikeli.top/");
+    return url.protocol === "https:" ? url.toString() : "https://cutout.tovikeli.top/";
   } catch {
-    return "https://tovikeli.top/";
+    return "https://cutout.tovikeli.top/";
   }
 }
 
@@ -273,7 +273,7 @@ function verificationResultPage(success, title, message, redirectUrl = "") {
   const refresh = success && target ? `<meta http-equiv="refresh" content="4;url=${target}">` : "";
   const button = success && target
     ? `<a class="button" href="${target}">返回 Tovikeli</a>`
-    : '<a class="button" href="https://tovikeli.top/">打开 Tovikeli</a>';
+    : '<a class="button" href="https://cutout.tovikeli.top/">打开 Tovikeli</a>';
   const html = `<!doctype html><html lang="zh-CN"><head><meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">${refresh}
 <title>${escapeHtml(title)} · Tovikeli</title>
