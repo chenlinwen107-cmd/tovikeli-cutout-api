@@ -94,10 +94,17 @@ async function handleRegister(request, env) {
     });
   } catch (error) {
     console.error("Verification email send failed:", error);
-    await env.DB.batch([
-      env.DB.prepare("DELETE FROM email_verification_tokens WHERE user_id = ?1").bind(userId),
-      env.DB.prepare("DELETE FROM users WHERE id = ?1 AND email_verified = 0").bind(userId),
-    ]);
+    try {
+      await env.DB.batch([
+        env.DB.prepare("DELETE FROM email_verification_tokens WHERE user_id = ?1").bind(userId),
+        env.DB.prepare("DELETE FROM users WHERE id = ?1 AND email_verified = 0").bind(userId),
+      ]);
+    } catch (cleanupError) {
+      console.error("Registration cleanup failed", {
+        userId,
+        error: String(cleanupError),
+      });
+    }
     return json({ error: { code: "verification_email_failed" } }, 502);
   }
 
