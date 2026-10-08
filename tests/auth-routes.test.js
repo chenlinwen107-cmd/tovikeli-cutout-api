@@ -2,14 +2,15 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import worker from "../src/index.js";
 
-async function request(path, { method = "GET", body, contentType = "application/json" } = {}) {
+async function request(path, { method = "GET", body, contentType = "application/json", headers: extraHeaders, env = {} } = {}) {
   const headers = new Headers();
   if (contentType) headers.set("Content-Type", contentType);
+  for (const [name, value] of Object.entries(extraHeaders || {})) headers.set(name, value);
   return worker.fetch(new Request(`https://worker.test${path}`, {
     method,
     headers,
     ...(body !== undefined ? { body: typeof body === "string" ? body : JSON.stringify(body) } : {}),
-  }), {});
+  }), env);
 }
 
 test("health endpoint returns an uncached success response", async () => {
@@ -93,5 +94,44 @@ test("logout clears the session cookie without requiring a database lookup", asy
   const response = await request("/api/auth/logout", { method: "POST" });
   assert.equal(response.status, 200);
   assert.match(response.headers.get("Set-Cookie"), /tovikeli_session=/);
+  assert.match(response.headers.get("Set-Cookie"), /Max-Age=0/);
+});
+
+test("current-user endpoint rejects requests without a session cookie before touching D1", async () => {
+  const response = await request("/api/auth/me");
+  assert.equal(response.status, 401);
+  assert.deepEqual(await response.json(), { error: { code: "unauthorized" } });
+});
+
+test("logout deletes an existing session and clears the cookie", async () => {
+  const deleted = [];
+  const env = {
+    DB: {
+      prepare(sql) {
+        return {
+          bind(value) {
+            return {
+              async run() {
+                deleted.push({ sql, value });
+                return { success: true };
+              },
+            };
+          },
+        };
+      },
+    },
+  };
+
+  const response = await request("/api/auth/logout", {
+    method: "POST",
+    headers: { Cookie: "tovikeli_session=session-test-id" },
+    env,
+  });
+
+  assert.equal(response.status, 200);
+  assert.deepEqual(await response.json(), { ok: true });
+  assert.equal(deleted.length, 1);
+  assert.match(deleted[0].sql, /DELETE FROM sessions WHERE id = \?1/);
+  assert.equal(deleted[0].value, "session-test-id");
   assert.match(response.headers.get("Set-Cookie"), /Max-Age=0/);
 });
