@@ -1,6 +1,6 @@
 # D1 migration preflight: email verification
 
-Do **not** apply `0002_email_verification.sql`, `0003_email_verification_resend_limits.sql`, or `0004_email_verification_daily_limit.sql` until these checks pass against the existing production D1 database.
+Do **not** apply `0002_email_verification.sql`, `0003_email_verification_resend_limits.sql`, or `0004_email_verification_daily_limit.sql`, or `0005_global_email_daily_budget.sql` until these checks pass against the existing production D1 database.
 
 Run each query separately in the Cloudflare D1 SQL console. These are read-only checks.
 
@@ -47,17 +47,17 @@ Only after the schema checks pass, apply `migrations/0002_email_verification.sql
 ```sql
 PRAGMA table_info(users);
 SELECT name FROM sqlite_master
-WHERE type = 'table' AND name IN ('email_verification_tokens', 'email_verification_resend_limits');
+WHERE type = 'table' AND name IN ('email_verification_tokens', 'email_verification_resend_limits', 'email_verification_global_daily_budget');
 SELECT COUNT(*) AS users_count FROM users;
 SELECT COUNT(*) AS sessions_count FROM sessions;
 ```
 
-Confirm that `users.email_verified`, `email_verification_tokens`, and `email_verification_resend_limits` exist. Confirm the rate-limit table contains `daily_window_started_at` and `daily_send_count`, and the user/session counts have not unexpectedly changed.
+Confirm that `users.email_verified`, `email_verification_tokens`, and `email_verification_resend_limits` exist. Confirm the rate-limit table contains `daily_window_started_at` and `daily_send_count`; confirm `email_verification_global_daily_budget` exists; and confirm the user/session counts have not unexpectedly changed.
 
 ## Important
 
 - This checklist does not execute any SQL and does not modify D1.
-- Do not deploy the email-verification Worker before all three migrations are applied successfully; registration/login expect `users.email_verified`, and resend expects `email_verification_resend_limits` with the daily-limit columns.
+- Do not deploy the email-verification Worker before all four migrations are applied successfully; registration/login expect `users.email_verified`, and resend expects `email_verification_resend_limits` with the daily-limit columns and the global budget table.
 - Existing users receive `email_verified = 1` through the migration default, while newly registered users are inserted with `email_verified = 0`.
 - If the existing schema differs from the assumptions above, stop and update the migration/code to match the real schema before proceeding.
 
@@ -101,3 +101,16 @@ Test only in a non-production environment after applying all three migrations:
 - Concurrent resend requests do not exceed the configured limit; verify against the actual D1 runtime before deployment.
 
 The endpoint intentionally returns a generic response for unknown, verified, and rate-limited addresses to reduce account enumeration. Do not test by sending repeated emails to real users.
+
+
+## Global email budget test matrix
+
+- The global budget table is empty before the first allowed verification-email attempt.
+- The first attempt creates the singleton row with count 1.
+- Up to 80 attempts are reserved in a rolling 24-hour window; the 81st is blocked.
+- After the rolling window expires, the counter resets atomically on the next attempt.
+- Both registration and resend use the same global budget.
+- A failed Resend attempt still consumes its reserved slot; do not retry automatically.
+- Verify concurrent requests cannot reserve more than 80 slots using a non-production D1 database.
+
+The 80-attempt ceiling is intentionally below the provider's stated free quota to leave room for operational headroom. It is a rolling 24-hour window and may not align with Resend's quota reset period.
