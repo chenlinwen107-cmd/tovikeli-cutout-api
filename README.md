@@ -6,6 +6,7 @@ Dependency-free Cloudflare Worker for the current Tovikeli Cutout frontend.
 
 - GET /api/auth/me
 - POST /api/auth/register
+- POST /api/auth/resend-verification
 - GET /api/auth/verify-email (confirmation page)
 - POST /api/auth/verify-email (confirm verification)
 - POST /api/auth/login
@@ -27,7 +28,7 @@ The Worker expects a D1 binding named `DB`, pointing to the existing `tovikeli-c
 
 ## Not included yet
 
-AI cutout, R2, subscriptions, points, usage billing, admin panel and advanced rate limiting are intentionally deferred.
+AI cutout, R2, subscriptions, points, usage billing and admin panel are intentionally deferred. Verification-email resend has a dedicated persistent per-email rate limit.
 
 
 ## Email verification (feature branch)
@@ -45,8 +46,8 @@ The `CREDITS_ADDED_TEMPLATE_ID` can be configured now, but the credits-added ema
 
 ### Database migration
 
-Before applying `migrations/0002_email_verification.sql`, follow [`docs/d1-email-verification-migration-checklist.md`](docs/d1-email-verification-migration-checklist.md) to inspect the real D1 schema and record baseline counts. The checklist is read-only and does not modify D1. Once the schema is confirmed, apply the migration exactly once. It adds `users.email_verified` (existing accounts default to verified) and the `email_verification_tokens` table. Do not deploy this branch until the migration succeeds.
+Before applying migrations, follow [`docs/d1-email-verification-migration-checklist.md`](docs/d1-email-verification-migration-checklist.md) to inspect the real D1 schema and record baseline counts. The checklist is read-only and does not modify D1. Once the schema is confirmed, apply `migrations/0002_email_verification.sql` and then `migrations/0003_email_verification_resend_limits.sql`, each exactly once. Migration 0002 adds `users.email_verified` (existing accounts default to verified) and the token table; migration 0003 adds the hashed-email rate-limit table. Do not deploy this branch until both migrations succeed.
 
 ### Registration behavior
 
-New registrations create an unverified account and send a 30-minute verification link. The user is not logged in until verification succeeds. The verification link opens a branded confirmation page and then returns to `APP_BASE_URL`. Expired or invalid links currently require support intervention; automatic resend is not implemented yet.
+New registrations create an unverified account and send a 30-minute verification link. The user is not logged in until verification succeeds. The verification link opens a branded confirmation page and then returns to `APP_BASE_URL`. Expired or invalid links can be replaced by calling `POST /api/auth/resend-verification` with `{ "email": "user@example.com" }`. The endpoint returns a generic response to avoid confirming whether an address has an account, and allows at most one resend per 60 seconds and three sends in a rolling hourly window per normalized email address. Limits are stored using a SHA-256 email hash in D1. The hourly window/cooldown slot is consumed before sending; a provider failure returns an error and leaves the slot consumed to prevent rapid retries. The endpoint only sends to existing, unverified accounts.
