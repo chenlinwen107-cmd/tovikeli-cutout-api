@@ -44,7 +44,7 @@ The `CREDITS_ADDED_TEMPLATE_ID` can be configured now, but the credits-added ema
 
 ### Database migration
 
-Apply `migrations/0002_email_verification.sql` to the existing D1 database before deploying this branch. It adds `users.email_verified` (existing accounts default to verified) and the `email_verification_tokens` table.
+Before applying `migrations/0002_email_verification.sql`, follow [`docs/d1-email-verification-migration-checklist.md`](docs/d1-email-verification-migration-checklist.md) to inspect the real D1 schema and record baseline counts. The checklist is read-only and does not modify D1. Once the schema is confirmed, apply the migration exactly once. It adds `users.email_verified` (existing accounts default to verified) and the `email_verification_tokens` table. Do not deploy this branch until the migration succeeds.
 
 ### Registration behavior
 
