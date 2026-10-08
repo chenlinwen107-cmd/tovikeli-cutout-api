@@ -1,0 +1,13 @@
+{
+  "name": "tovikeli-cutout-api",
+  "private": true,
+  "version": "0.1.0",
+  "description": "Tovikeli Cutout Cloudflare Worker API",
+  "scripts": {
+    "deploy": "wrangler deploy",
+    "dev": "wrangler dev"
+  },
+  "devDependencies": {
+    "wrangler": "^4.0.0"
+  }
+}
