@@ -33,7 +33,10 @@ async function handleRequest(request, env) {
     return handleLogout(request, env);
   }
   if (url.pathname === "/api/auth/verify-email" && request.method === "GET") {
-    return handleVerifyEmail(url, env);
+    return handleVerifyEmail(url, env, true);
+  }
+  if (url.pathname === "/api/auth/verify-email" && request.method === "POST") {
+    return handleVerifyEmail(url, env, false);
   }
   if (url.pathname === "/api/health" && request.method === "GET") {
     return json({ ok: true, service: "tovikeli-cutout-api" });
@@ -193,7 +196,7 @@ async function handleLogout(request, env) {
 }
 
 
-async function handleVerifyEmail(url, env) {
+async function handleVerifyEmail(url, env, confirmOnly) {
   const token = url.searchParams.get("token") || "";
   if (!token || token.length > 200) {
     return verificationResultPage(false, "验证链接无效", "请检查邮件中的链接是否完整。");
@@ -215,6 +218,8 @@ async function handleVerifyEmail(url, env) {
     await env.DB.prepare("DELETE FROM email_verification_tokens WHERE token_hash = ?1").bind(tokenHash).run();
     return verificationResultPage(false, "验证链接已过期", "此链接已超过 30 分钟有效期。目前暂不支持自动重发验证邮件，请联系 Tovikeli 支持。");
   }
+
+  if (confirmOnly) return verificationConfirmPage(token);
 
   await env.DB.batch([
     env.DB.prepare("UPDATE users SET email_verified = 1 WHERE id = ?1").bind(record.user_id),
