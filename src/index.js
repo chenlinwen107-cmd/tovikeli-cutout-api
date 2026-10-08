@@ -26,6 +26,9 @@ async function handleRequest(request, env) {
   if (url.pathname === "/api/auth/register" && request.method === "POST") {
     return handleRegister(request, env);
   }
+  if (url.pathname === "/api/auth/resend-verification" && request.method === "POST") {
+    return handleResendVerification(request, env);
+  }
   if (url.pathname === "/api/auth/login" && request.method === "POST") {
     return handleLogin(request, env);
   }
@@ -113,6 +116,103 @@ async function handleRegister(request, env) {
     verificationRequired: true,
     message: "请检查邮箱并点击验证链接。验证链接 30 分钟内有效。",
   }, 201);
+}
+
+async function handleResendVerification(request, env) {
+  const body = await readJson(request);
+  const emailInput = typeof body?.email === "string" ? body.email.trim() : "";
+  if (!emailInput || emailInput.length > 254 || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(emailInput)) {
+    return json({ error: { code: "validation_error", fields: { email: "invalid" } } }, 400);
+  }
+  if (!env.RESEND_API_KEY || !env.VERIFY_EMAIL_TEMPLATE_ID) {
+    return json({ error: { code: "email_service_not_configured" } }, 503);
+  }
+
+  const email = normalizeEmail(emailInput);
+  const genericResponse = () => json({
+    ok: true,
+    message: "如果该邮箱对应尚未验证的账户且当前允许发送，验证邮件将会发送。请检查收件箱和垃圾邮件文件夹。",
+  });
+
+  const user = await env.DB
+    .prepare("SELECT id, email_verified FROM users WHERE email = ?1 LIMIT 1")
+    .bind(email)
+    .first();
+  if (!user || user.email_verified) return genericResponse();
+
+  const now = new Date().toISOString();
+  const emailHash = await sha256Hex(email);
+  const slot = await env.DB.prepare(
+    `INSERT INTO email_verification_resend_limits
+       (email_hash, window_started_at, last_sent_at, send_count)
+     VALUES (?1, ?2, ?2, 1)
+     ON CONFLICT(email_hash) DO UPDATE SET
+       window_started_at = CASE
+         WHEN unixepoch(?2) - unixepoch(window_started_at) >= 3600 THEN ?2
+         ELSE window_started_at
+       END,
+       send_count = CASE
+         WHEN unixepoch(?2) - unixepoch(window_started_at) >= 3600 THEN 1
+         ELSE send_count + 1
+       END,
+       last_sent_at = ?2
+     WHERE
+       unixepoch(?2) - unixepoch(window_started_at) >= 3600
+       OR (unixepoch(?2) - unixepoch(last_sent_at) >= 60 AND send_count < 3)
+     RETURNING send_count`
+  ).bind(emailHash, now).first();
+
+  // Return the same response for rate-limited and unknown/verified addresses.
+  if (!slot) return genericResponse();
+
+  const token = randomToken();
+  const tokenHash = await sha256Hex(token);
+  const expiresAt = new Date(Date.now() + VERIFY_TOKEN_MINUTES * 60_000).toISOString();
+  await env.DB.prepare(
+    "INSERT INTO email_verification_tokens (token_hash, user_id, expires_at, created_at) VALUES (?1, ?2, ?3, ?4)"
+  ).bind(tokenHash, user.id, expiresAt, now).run();
+
+  const verificationUrl = new URL("/api/auth/verify-email", request.url);
+  verificationUrl.searchParams.set("token", token);
+
+  try {
+    await sendTemplateEmail(env, {
+      to: email,
+      templateId: env.VERIFY_EMAIL_TEMPLATE_ID,
+      variables: {
+        USER_NAME: "用户",
+        VERIFICATION_URL: verificationUrl.toString(),
+        EXPIRES_IN: String(VERIFY_TOKEN_MINUTES),
+      },
+      idempotencyKey: `verify-email-resend/${user.id}/${tokenHash}`,
+    });
+  } catch (error) {
+    console.error("Verification resend failed:", error);
+    try {
+      await env.DB.prepare("DELETE FROM email_verification_tokens WHERE token_hash = ?1").bind(tokenHash).run();
+    } catch (cleanupError) {
+      console.error("Resend token cleanup failed", {
+        userId: user.id,
+        error: String(cleanupError),
+      });
+    }
+    // The rate-limit slot remains consumed to prevent retries from bypassing the cooldown.
+    return json({ error: { code: "verification_email_failed" } }, 502);
+  }
+
+  try {
+    await env.DB.prepare(
+      "DELETE FROM email_verification_tokens WHERE user_id = ?1 AND token_hash <> ?2"
+    ).bind(user.id, tokenHash).run();
+  } catch (cleanupError) {
+    // The new email is already sent; old links may remain valid until used or expired.
+    console.error("Old verification token cleanup failed", {
+      userId: user.id,
+      error: String(cleanupError),
+    });
+  }
+
+  return genericResponse();
 }
 
 async function handleLogin(request, env) {
