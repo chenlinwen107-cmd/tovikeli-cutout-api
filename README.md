@@ -37,7 +37,7 @@ This branch adds a Resend-backed email verification flow.
 - `DB`: existing D1 database.
 - `RESEND_API_KEY`: Worker secret with Resend sending access.
 - `VERIFY_EMAIL_TEMPLATE_ID`: published Resend template alias (currently `verification-email`).
-- `APP_BASE_URL`: HTTPS URL of the actual Tovikeli frontend to return to after verification. Set this to the deployed site URL before testing; if omitted, the Worker falls back to `https://tovikeli.top/`.
+- `APP_BASE_URL`: HTTPS URL of the Tovikeli Cutout frontend to return to after verification. Planned production URL: `https://cutout.tovikeli.top`. This subdomain has been chosen in advance but is not yet deployed; set this variable to the actual frontend URL when the site is ready. If omitted, the Worker falls back to `https://cutout.tovikeli.top/`.
 
 The `CREDITS_ADDED_TEMPLATE_ID` can be configured now, but the credits-added email is not triggered yet because payment and credit-ledger logic are not implemented.
 
