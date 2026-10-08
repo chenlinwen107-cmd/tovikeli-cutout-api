@@ -51,3 +51,14 @@ Before applying migrations, follow [`docs/d1-email-verification-migration-checkl
 ### Registration behavior
 
 New registrations create an unverified account and send a 30-minute verification link. The user is not logged in until verification succeeds. The verification link opens a branded confirmation page and then returns to `APP_BASE_URL`. Expired or invalid links can be replaced by calling `POST /api/auth/resend-verification` with `{ "email": "user@example.com" }`. The endpoint returns a generic response to avoid confirming whether an address has an account, and allows at most one resend per 60 seconds and three sends in a fixed hourly window that begins with the first allowed send per normalized email address. Limits are stored using a SHA-256 email hash in D1. The hourly window/cooldown slot is consumed before sending; a provider failure returns an error and leaves the slot consumed to prevent rapid retries. The endpoint only sends to existing, unverified accounts.
+
+
+## Local smoke tests
+
+The repository includes initial route-level smoke tests using Node's built-in test runner; no additional test framework is required. Use Node.js 20 or newer:
+
+```sh
+npm test
+```
+
+These tests cover health/unknown routes and malformed or missing inputs for registration and verification-email resend. They do not replace integration tests against a test D1 database and a mocked Resend API. The tests have been added to the repository but have not yet been executed in this environment.
