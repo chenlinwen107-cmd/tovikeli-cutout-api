@@ -91,8 +91,8 @@ Test only in a non-production environment after applying both migrations:
 - An already verified email returns the same generic response and sends no email.
 - An existing unverified account receives a fresh 30-minute link.
 - A second request inside 60 seconds is suppressed.
-- After the cooldown, no more than three sends are accepted within the hourly window.
-- The fourth request within the hourly window is suppressed; the limit resets after one hour.
+- After the cooldown, no more than three sends are accepted within the fixed hourly window that starts with the first allowed send.
+- The fourth request within that fixed hourly window is suppressed; the limit resets one hour after the first allowed send.
 - A Resend failure returns an error, removes the newly created token if cleanup succeeds, and does not free the rate-limit slot.
 - A successful resend removes older tokens for that user after the new message is accepted.
 - The rate-limit table stores only the SHA-256 email hash, not the raw email address.
