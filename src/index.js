@@ -168,14 +168,14 @@ async function handleResendVerification(request, env) {
        END,
        last_sent_at = ?2
      WHERE
-       daily_window_started_at IS NULL
-       OR unixepoch(?2) - unixepoch(daily_window_started_at) >= 86400
-       OR (
-         daily_send_count < 5
-         AND (
-           unixepoch(?2) - unixepoch(window_started_at) >= 3600
-           OR (unixepoch(?2) - unixepoch(last_sent_at) >= 60 AND send_count < 3)
-         )
+       (
+         daily_window_started_at IS NULL
+         OR unixepoch(?2) - unixepoch(daily_window_started_at) >= 86400
+         OR daily_send_count < 5
+       )
+       AND (
+         unixepoch(?2) - unixepoch(window_started_at) >= 3600
+         OR (unixepoch(?2) - unixepoch(last_sent_at) >= 60 AND send_count < 3)
        )
      RETURNING send_count, daily_send_count`
   ).bind(emailHash, now).first();
