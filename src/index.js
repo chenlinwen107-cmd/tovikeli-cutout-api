@@ -9,13 +9,47 @@ const EMAIL_FROM = "Tovikeli <noreply@tovikeli.top>";
 export default {
   async fetch(request, env) {
     try {
-      return await handleRequest(request, env);
+      const origin = request.headers.get("Origin");
+      const allowedOrigin = getAllowedOrigin(origin, env);
+      if (request.method === "OPTIONS") {
+        if (!allowedOrigin) return new Response(null, { status: 403, headers: { "Cache-Control": "no-store" } });
+        return withCors(new Response(null, { status: 204 }), allowedOrigin);
+      }
+
+      const response = await handleRequest(request, env);
+      return allowedOrigin ? withCors(response, allowedOrigin) : response;
     } catch (error) {
       console.error("Unhandled error:", error);
-      return json({ error: { code: "server_error" } }, 500);
+      const response = json({ error: { code: "server_error" } }, 500);
+      const allowedOrigin = getAllowedOrigin(request.headers.get("Origin"), env);
+      return allowedOrigin ? withCors(response, allowedOrigin) : response;
     }
   },
 };
+
+function getAllowedOrigin(origin, env) {
+  if (!origin) return null;
+  const configured = typeof env.CORS_ALLOWED_ORIGINS === "string"
+    ? env.CORS_ALLOWED_ORIGINS.split(",").map((item) => item.trim()).filter(Boolean)
+    : [];
+  const allowed = new Set(["https://cutout.tovikeli.top", ...configured]);
+  return allowed.has(origin) ? origin : null;
+}
+
+function withCors(response, origin) {
+  const headers = new Headers(response.headers);
+  headers.set("Access-Control-Allow-Origin", origin);
+  headers.set("Access-Control-Allow-Credentials", "true");
+  headers.set("Access-Control-Allow-Methods", "GET, POST, OPTIONS");
+  headers.set("Access-Control-Allow-Headers", "Content-Type");
+  headers.set("Access-Control-Max-Age", "600");
+  headers.append("Vary", "Origin");
+  return new Response(response.body, {
+    status: response.status,
+    statusText: response.statusText,
+    headers,
+  });
+}
 
 async function handleRequest(request, env) {
   const url = new URL(request.url);
