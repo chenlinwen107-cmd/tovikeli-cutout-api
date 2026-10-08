@@ -1,6 +1,6 @@
 # D1 migration preflight: email verification
 
-Do **not** apply `0002_email_verification.sql` or `0003_email_verification_resend_limits.sql` until these checks pass against the existing production D1 database.
+Do **not** apply `0002_email_verification.sql`, `0003_email_verification_resend_limits.sql`, or `0004_email_verification_daily_limit.sql` until these checks pass against the existing production D1 database.
 
 Run each query separately in the Cloudflare D1 SQL console. These are read-only checks.
 
@@ -42,7 +42,7 @@ Record the counts before migration so they can be compared afterward. Do not exp
 
 ## 5. Apply and verify
 
-Only after the schema checks pass, apply `migrations/0002_email_verification.sql` once, followed by `migrations/0003_email_verification_resend_limits.sql` once. Then run:
+Only after the schema checks pass, apply `migrations/0002_email_verification.sql` once, followed by `migrations/0003_email_verification_resend_limits.sql` once and `migrations/0004_email_verification_daily_limit.sql` once. Then run:
 
 ```sql
 PRAGMA table_info(users);
@@ -52,12 +52,12 @@ SELECT COUNT(*) AS users_count FROM users;
 SELECT COUNT(*) AS sessions_count FROM sessions;
 ```
 
-Confirm that `users.email_verified`, `email_verification_tokens`, and `email_verification_resend_limits` exist, and the user/session counts have not unexpectedly changed.
+Confirm that `users.email_verified`, `email_verification_tokens`, and `email_verification_resend_limits` exist. Confirm the rate-limit table contains `daily_window_started_at` and `daily_send_count`, and the user/session counts have not unexpectedly changed.
 
 ## Important
 
 - This checklist does not execute any SQL and does not modify D1.
-- Do not deploy the email-verification Worker before both migrations are applied successfully; registration/login expect `users.email_verified`, and resend expects `email_verification_resend_limits`.
+- Do not deploy the email-verification Worker before all three migrations are applied successfully; registration/login expect `users.email_verified`, and resend expects `email_verification_resend_limits` with the daily-limit columns.
 - Existing users receive `email_verified = 1` through the migration default, while newly registered users are inserted with `email_verified = 0`.
 - If the existing schema differs from the assumptions above, stop and update the migration/code to match the real schema before proceeding.
 
@@ -85,14 +85,16 @@ Do not run destructive tests against production users.
 
 ## Verification resend test matrix
 
-Test only in a non-production environment after applying both migrations:
+Test only in a non-production environment after applying all three migrations:
 
 - An unknown email returns the same generic success-shaped response and sends no email.
 - An already verified email returns the same generic response and sends no email.
 - An existing unverified account receives a fresh 30-minute link.
 - A second request inside 60 seconds is suppressed.
 - After the cooldown, no more than three sends are accepted within the fixed hourly window that starts with the first allowed send.
-- The fourth request within that fixed hourly window is suppressed; the limit resets one hour after the first allowed send.
+- The fourth request within that fixed hourly window is suppressed; the hourly limit resets one hour after the first allowed send.
+- The sixth allowed attempt within a fixed 24-hour window is suppressed; the daily limit resets 24 hours after the first allowed attempt in that window.
+- Reaching the daily limit remains blocked even after the hourly window resets; reaching the hourly limit remains blocked even if the daily window resets.
 - A Resend failure returns an error, removes the newly created token if cleanup succeeds, and does not free the rate-limit slot.
 - A successful resend removes older tokens for that user after the new message is accepted.
 - The rate-limit table stores only the SHA-256 email hash, not the raw email address.
