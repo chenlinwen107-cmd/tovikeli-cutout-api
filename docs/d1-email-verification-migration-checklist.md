@@ -60,3 +60,24 @@ Confirm that `users.email_verified` exists, `email_verification_tokens` exists, 
 - Do not deploy the email-verification Worker before the migration is applied successfully; its registration and login queries expect `users.email_verified`.
 - Existing users receive `email_verified = 1` through the migration default, while newly registered users are inserted with `email_verified = 0`.
 - If the existing schema differs from the assumptions above, stop and update the migration/code to match the real schema before proceeding.
+
+
+## Registration failure recovery
+
+If the email provider rejects a verification message, the Worker attempts to remove the newly created unverified user and token. If D1 is unavailable during that cleanup, the cleanup itself can fail; inspect Worker logs for `Registration cleanup failed` and reconcile only the affected unverified account after confirming the email was not delivered. Never log or share passwords, raw verification tokens, session IDs, or password hashes.
+
+## Verification-link behavior test matrix
+
+Before deployment, test these cases in a non-production D1 database:
+
+- A valid token opened with GET displays the confirmation page and does not mark the account verified.
+- Submitting that page with POST verifies the account and removes the token.
+- Reusing the token after successful verification fails as invalid/used.
+- An expired token fails and is removed.
+- A malformed or missing token returns an invalid-link page.
+- A new account cannot log in before verification; it can log in after verification.
+- Existing accounts retain access after migration.
+- A simulated Resend failure returns an error and attempts to clean up the pending account/token.
+- A simulated D1 cleanup failure is logged without exposing secrets in logs.
+
+Do not run destructive tests against production users.
