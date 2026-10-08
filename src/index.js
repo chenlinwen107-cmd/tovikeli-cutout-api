@@ -66,13 +66,14 @@ async function handleRegister(request, env) {
   const tokenHash = await sha256Hex(token);
   const expiresAt = new Date(Date.now() + VERIFY_TOKEN_MINUTES * 60_000).toISOString();
 
-  await env.DB.prepare(
-    "INSERT INTO users (id, email, password_hash, created_at, email_verified) VALUES (?1, ?2, ?3, ?4, 0)"
-  ).bind(userId, email, passwordHash, createdAt).run();
-
-  await env.DB.prepare(
-    "INSERT INTO email_verification_tokens (token_hash, user_id, expires_at, created_at) VALUES (?1, ?2, ?3, ?4)"
-  ).bind(tokenHash, userId, expiresAt, createdAt).run();
+  await env.DB.batch([
+    env.DB.prepare(
+      "INSERT INTO users (id, email, password_hash, created_at, email_verified) VALUES (?1, ?2, ?3, ?4, 0)"
+    ).bind(userId, email, passwordHash, createdAt),
+    env.DB.prepare(
+      "INSERT INTO email_verification_tokens (token_hash, user_id, expires_at, created_at) VALUES (?1, ?2, ?3, ?4)"
+    ).bind(tokenHash, userId, expiresAt, createdAt),
+  ]);
 
   const verificationUrl = new URL("/api/auth/verify-email", request.url);
   verificationUrl.searchParams.set("token", token);
@@ -208,11 +209,11 @@ async function handleVerifyEmail(url, env) {
   ).bind(tokenHash).first();
 
   if (!record) {
-    return verificationResultPage(false, "验证链接无效或已使用", "请检查链接，或重新注册获取新的验证邮件。");
+    return verificationResultPage(false, "验证链接无效或已使用", "请检查链接是否完整。若仍无法验证，请联系 Tovikeli 支持。");
   }
   if (new Date(record.expires_at).getTime() <= Date.now()) {
     await env.DB.prepare("DELETE FROM email_verification_tokens WHERE token_hash = ?1").bind(tokenHash).run();
-    return verificationResultPage(false, "验证链接已过期", "请重新获取验证邮件后再试。");
+    return verificationResultPage(false, "验证链接已过期", "此链接已超过 30 分钟有效期。目前暂不支持自动重发验证邮件，请联系 Tovikeli 支持。");
   }
 
   await env.DB.batch([
